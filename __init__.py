@@ -8,11 +8,12 @@ bl_info = {
 }
 
 import bpy
+import rna_keymap_ui
 
 import os
 
 def append_node_group(name, path):
-    with bpy.data.libraries.load(path) as (data_from, data_to):
+    with bpy.data.libraries.load(path, link=True) as (data_from, data_to):
         nt = data_from.node_groups
         data_to.node_groups.append(nt[nt.index(name)])
 
@@ -31,9 +32,13 @@ class AV_OT_viewer(bpy.types.Operator):
         group_out = [node for node in self.node_tree.nodes if node.type == 'GROUP_OUTPUT']
         return group_out[0]
 
-    def set_defaults(self):
+    def reset_viewer(self, context):
         self.viewer.label = self.viewer.name = "Viewer"
         self.viewer.hide = True
+
+        preferences = context.preferences.addons[__package__].preferences
+        self.viewer.use_custom_color = preferences.custom_color
+        self.viewer.color = preferences.color
 
         group_out = self.get_group_out()
         self.viewer.location = group_out.location
@@ -78,7 +83,7 @@ class AV_OT_viewer(bpy.types.Operator):
                 node.node_tree = viewer_group
             self.viewer = node
 
-        self.set_defaults()
+        self.reset_viewer(context)
 
         mod = self.find_mod(context)
         self.prop = list(dict(mod.id_properties_ensure()))[-1]
@@ -87,7 +92,10 @@ class AV_OT_viewer(bpy.types.Operator):
         self.add_viewer_material()
 
         active_node = self.node_tree.nodes.active
-        visible_outputs = [_out for _out in active_node.outputs if _out.enabled]
+        visible_sockets = [_out for _out in active_node.outputs if _out.enabled]
+
+        if not visible_sockets:
+            return {'FINISHED'}
 
         if active_node.outputs[0].type == 'GEOMETRY':
             self.node_tree.links.new(active_node.outputs[0], self.viewer.inputs[0])
@@ -95,34 +103,60 @@ class AV_OT_viewer(bpy.types.Operator):
             if active_node.type == 'GROUP_INPUT':
                 return {'FINISHED'}
 
-            if len(visible_outputs) > 1:
-                visible_outputs.remove(active_node.outputs[0])
+            if len(visible_sockets) > 1:
+                visible_sockets.remove(active_node.outputs[0])
             else:
                 return {'FINISHED'}
 
         if not self.viewer.inputs['tmp_viewer'].is_linked:
-            if visible_outputs:
-                self.node_tree.links.new(visible_outputs[0], self.viewer.inputs[1])
+            if visible_sockets:
+                self.node_tree.links.new(visible_sockets[0], self.viewer.inputs[1])
         else:
             link = self.viewer.inputs['tmp_viewer'].links[0]
             _from_sock = link.from_socket
             node = _from_sock.node
             self.node_tree.links.remove(link)
             if not (node == active_node):
-                self.node_tree.links.new(visible_outputs[0], self.viewer.inputs[1])
+                self.node_tree.links.new(visible_sockets[0], self.viewer.inputs[1])
             else:
                 try:
-                    index = visible_outputs.index(_from_sock)
+                    index = visible_sockets.index(_from_sock)
                 except ValueError as err:
                     index = 0
-                self.node_tree.links.new(visible_outputs[(index + 1) % len(visible_outputs)], self.viewer.inputs[1])
+                self.node_tree.links.new(visible_sockets[(index + 1) % len(visible_sockets)], self.viewer.inputs[1])
 
         return {'FINISHED'}
+
+
+class AV_AddonPreferences(bpy.types.AddonPreferences):
+    bl_idname = __package__
+
+    custom_color: bpy.props.BoolProperty(default=False)
+    color: bpy.props.FloatVectorProperty(size=3, subtype='COLOR', default=(0.8, 0.2, 0.2), min=0.0, max=1.0)
+
+    def draw(self, context):
+        layout = self.layout
+
+        col = layout.column()
+        row = col.row(align=True)
+        row.prop(self, 'custom_color', text="Enable custom color for viewer")
+        row = col.row(align=True)
+        row.prop(self, 'color', text="Color")
+
+        col = layout.column()
+        col.label(text="Edit Keymap:")
+        kc = context.window_manager.keyconfigs.addon
+        for km, kmi in addon_keymaps:
+            km = km.active()
+            col.context_pointer_set("keymap", km)
+            rna_keymap_ui.draw_kmi([], kc, km, kmi, col, 0)
+
 
 addon_keymaps = []
 
 def register():
     bpy.utils.register_class(AV_OT_viewer)
+    bpy.utils.register_class(AV_AddonPreferences)
 
     kc = bpy.context.window_manager.keyconfigs.addon
     km = kc.keymaps.new(name="Node Editor", space_type='NODE_EDITOR')
@@ -136,4 +170,5 @@ def unregister():
         km.keymap_items.remove(kmi)
     addon_keymaps.clear()
 
+    bpy.utils.unregister_class(AV_AddonPreferences)
     bpy.utils.unregister_class(AV_OT_viewer)
