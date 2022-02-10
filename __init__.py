@@ -84,28 +84,38 @@ class AV_OT_viewer(bpy.types.Operator):
         self.prop = list(dict(mod.id_properties_ensure()))[-1]
         mod[self.prop] = "tmp_viewer"
 
+        self.add_viewer_material()
+
         active_node = self.node_tree.nodes.active
+        visible_outputs = [_out for _out in active_node.outputs if _out.enabled]
+
         if active_node.outputs[0].type == 'GEOMETRY':
             self.node_tree.links.new(active_node.outputs[0], self.viewer.inputs[0])
+
+            if active_node.type == 'GROUP_INPUT':
+                return {'FINISHED'}
+
+            if len(visible_outputs) > 1:
+                visible_outputs.remove(active_node.outputs[0])
+            else:
+                return {'FINISHED'}
+
+        if not self.viewer.inputs['tmp_viewer'].is_linked:
+            if visible_outputs:
+                self.node_tree.links.new(visible_outputs[0], self.viewer.inputs[1])
         else:
-            visible_outputs = [_out for _out in active_node.outputs if _out.enabled]
-            if not self.viewer.inputs['tmp_viewer'].is_linked:
+            link = self.viewer.inputs['tmp_viewer'].links[0]
+            _from_sock = link.from_socket
+            node = _from_sock.node
+            self.node_tree.links.remove(link)
+            if not (node == active_node):
                 self.node_tree.links.new(visible_outputs[0], self.viewer.inputs[1])
             else:
-                link = self.viewer.inputs['tmp_viewer'].links[0]
-                _from_sock = link.from_socket
-                node = _from_sock.node
-                self.node_tree.links.remove(link)
-                if not (node == active_node):
-                    self.node_tree.links.new(visible_outputs[0], self.viewer.inputs[1])
-                else:
-                    try:
-                        index = visible_outputs.index(_from_sock)
-                    except ValueError as err:
-                        index = 0
-                    self.node_tree.links.new(visible_outputs[(index + 1) % len(visible_outputs)], self.viewer.inputs[1])
-
-        self.add_viewer_material()
+                try:
+                    index = visible_outputs.index(_from_sock)
+                except ValueError as err:
+                    index = 0
+                self.node_tree.links.new(visible_outputs[(index + 1) % len(visible_outputs)], self.viewer.inputs[1])
 
         return {'FINISHED'}
 
