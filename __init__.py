@@ -30,6 +30,8 @@ class AV_OT_viewer(bpy.types.Operator):
 
     def get_group_out(self):
         group_out = [node for node in self.node_tree.nodes if node.type == 'GROUP_OUTPUT']
+        if not group_out:
+            return self.node_tree.nodes.new(type="NodeGroupOutput")
         return group_out[0]
 
     def reset_viewer(self, context):
