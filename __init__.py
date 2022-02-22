@@ -67,7 +67,7 @@ class AV_OT_viewer(bpy.types.Operator):
         self.viewer.node_tree.nodes["mat"].inputs["Material"].default_value = mat
 
     def find_mod(self, context):
-        mods = [mod for mod in context.object.modifiers if mod.node_group.name == self.node_tree.name]
+        mods = [mod for mod in context.object.modifiers if hasattr(mod, 'node_group') and mod.node_group.name == self.node_tree.name]
         return mods[-1]
 
     def execute(self, context):
