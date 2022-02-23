@@ -28,11 +28,16 @@ class AV_OT_viewer(bpy.types.Operator):
     def poll(cls, context):
         return hasattr(context.space_data, "edit_tree") and context.space_data.tree_type == "GeometryNodeTree" and context.space_data.node_tree.nodes.active
 
-    def get_group_out(self):
-        group_out = [node for node in self.node_tree.nodes if node.type == 'GROUP_OUTPUT']
+    def get_group_out(self, ntree):
+        group_out = [node for node in ntree.nodes if node.type == 'GROUP_OUTPUT']
         if not group_out:
-            return self.node_tree.nodes.new(type="NodeGroupOutput")
+            return ntree.nodes.new(type="NodeGroupOutput")
         return group_out[0]
+
+    def clear_tmp_viewer_sockets(self, ntree):
+        for sock in ntree.outputs:
+            if sock.name == "tmp_viewer":
+                ntree.outputs.remove(sock)
 
     def reset_viewer(self, context):
         self.viewer.label = self.viewer.name = "Viewer"
@@ -42,9 +47,16 @@ class AV_OT_viewer(bpy.types.Operator):
         self.viewer.use_custom_color = preferences.custom_color
         self.viewer.color = preferences.color
 
-        group_out = self.get_group_out()
+        group_out = self.get_group_out(self.node_tree)
         self.viewer.location = group_out.location
         self.viewer.location[1] += 40
+
+        active = self.node_tree.nodes.active
+        if hasattr(active, "node_tree"):
+            if active == self.viewer:
+                return
+            else:
+                self.clear_tmp_viewer_sockets(active.node_tree)
 
         if group_out.inputs[-2].name != "tmp_viewer":
             for _input in self.node_tree.outputs:
@@ -74,6 +86,7 @@ class AV_OT_viewer(bpy.types.Operator):
 
     def execute(self, context):
         self.node_tree = context.space_data.node_tree
+        self.edit_tree = context.space_data.edit_tree
         self.viewer =  self.node_tree.nodes.get("Viewer")
         if not self.viewer:
             viewer_group = bpy.data.node_groups.get(".GeoNodeAttribViewer")
@@ -94,6 +107,25 @@ class AV_OT_viewer(bpy.types.Operator):
         self.add_viewer_material()
 
         active_node = self.node_tree.nodes.active
+        if active_node == self.viewer:
+            return {'FINISHED'}
+
+        if self.edit_tree is not self.node_tree:
+            group_out = self.get_group_out(self.edit_tree)
+            active = self.edit_tree.nodes.active
+            if not active.outputs:
+                return {'FINISHED'}
+
+            if active.outputs[0].type == "GEOMETRY":
+                return {'FINISHED'}
+
+
+            sock = self.edit_tree.outputs.new(type="NodeSocketColor", name="tmp_viewer")
+            self.edit_tree.links.new(active.outputs[0], group_out.inputs[-2])
+
+            self.node_tree.links.new(self.node_tree.nodes.active.outputs[-1], self.viewer.inputs[1])
+            return {'FINISHED'}
+
         visible_sockets = [_out for _out in active_node.outputs if _out.enabled]
 
         if not visible_sockets:
